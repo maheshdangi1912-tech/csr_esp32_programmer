@@ -1,0 +1,59 @@
+# Use mingw32
+#TOOLCHAIN ?= i586-mingw32msvc-
+# Use mingw-w64
+TOOLCHAIN ?= i686-w64-mingw32-
+
+# Fixes compilation on Debian/Ubuntu with mingw-w64 < 3.0.
+# See: http://sourceforge.net/p/mingw-w64/mailman/mingw-w64-public/thread/4F8CA26A.70103@users.sourceforge.net/
+#CPPFLAGS +=	-DCOMPAT_MINGW_MS_VSNPRINTF
+CPPFLAGS +=	-DCOMPAT_TIMER_MACROS
+
+# Compile with debugging
+#CFLAGS += -g -fno-inline
+#LDFLAGS += -g -fno-inline
+# Compile without debugging
+LDFLAGS += -s
+
+CXX =	$(TOOLCHAIN)g++
+CC =	$(TOOLCHAIN)gcc
+LD =	$(TOOLCHAIN)gcc
+
+VERSION := $(shell cat VERSION)
+GIT_REVISION := $(shell git log -1 --format=%h 2>/dev/null)
+CPPFLAGS +=	-DVERSION=\"$(VERSION)\" -DGIT_REVISION=\"$(GIT_REVISION)\"
+
+CFLAGS +=	-m32 -Wall
+CXXFLAGS += -fno-exceptions
+LDFLAGS +=	-shared -m32 -O2 -static
+
+MAKEFILE =	$(firstword $(MAKEFILE_LIST))
+
+LIBDIR =	lib-win32
+OBJDIR =	obj-win32
+LIBNAME =	usbspi.dll
+LIBRARY_DEF =	usbspi.dll.def
+
+all: $(LIBDIR)/$(LIBNAME)
+
+$(OBJDIR)/basics.o: spi.h spifns.h logging.h dllmain.h compat.h
+$(OBJDIR)/spi.o: spi.h compat.h logging.h
+$(OBJDIR)/logging.o: logging.h compat.h
+
+$(LIBDIR)/$(LIBNAME): $(OBJDIR)/$(LIBNAME)
+	mkdir -p $(LIBDIR)
+	cp -p $< $@
+
+$(OBJDIR)/$(LIBNAME): $(OBJDIR)/dllmain.o $(OBJDIR)/logging.o $(OBJDIR)/basics.o $(OBJDIR)/spi.o $(OBJDIR)/compat.o $(LIBRARY_DEF)
+	mkdir -p $(OBJDIR)
+	$(LD) $(LDFLAGS) $^ -o $@ $(LDLIBS) -Wl,--out-implib,$@.a
+
+$(OBJDIR)/%.o: %.c
+	mkdir -p $(OBJDIR)
+	$(CC) -c $(CFLAGS) $(CPPFLAGS) -o $@ $<
+
+$(OBJDIR)/%.o: %.cpp
+	mkdir -p $(OBJDIR)
+	$(CXX) -c $(CFLAGS) $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
+
+clean:
+	rm -fr $(LIBDIR) $(OBJDIR)

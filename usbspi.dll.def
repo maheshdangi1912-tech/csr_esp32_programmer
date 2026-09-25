@@ -1,0 +1,27 @@
+EXPORTS
+    spifns_init
+    spifns_close
+    spifns_get_version
+    spifns_getvar
+    spifns_getvarlist
+    spifns_get_last_error
+    spifns_clear_last_error
+    spifns_command
+    spifns_chip_select
+    spifns_set_debug_callback
+    spifns_sequence
+    spifns_enumerate_ports
+    spifns_bluecore_xap_stopped
+    spifns_stream_init
+    spifns_stream_close
+    spifns_count_streams
+    spifns_stream_sequence
+    spifns_stream_command
+    spifns_stream_getvar
+    spifns_stream_chip_select
+    spifns_stream_bluecore_xap_stopped
+    spifns_get_last_error32
+    spifns_stream_set_debug_callback
+    spifns_stream_get_device_id
+    spifns_stream_lock
+    spifns_stream_unlock
