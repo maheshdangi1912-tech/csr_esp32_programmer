@@ -1,0 +1,163 @@
+/*
+ * esp32_csr_bitbang_bridge.ino - Fixed Hardware Deselect Status Protocol
+ */
+
+#define PIN_CS    5
+#define PIN_SCK   18
+#define PIN_MISO  19
+#define PIN_MOSI  23
+
+#define SERIAL_BAUD   921600
+#define BUFFER_SIZE   2048
+
+#define SYNC_BYTE       0xA5
+#define CMD_PING        0x01
+#define CMD_SET_CLK     0x02
+#define CMD_CS_LOW      0x03
+#define CMD_CS_HIGH     0x04
+#define CMD_XFER        0x05
+#define CMD_GET_STATUS  0x06
+#define RESP_OK_FLAG    0x80
+
+static uint8_t io_buffer[BUFFER_SIZE];
+static uint32_t half_period_us = 10; /* Clean ~25 kHz clock */
+
+static inline uint8_t bb_transfer(uint8_t out) {
+    uint8_t in = 0;
+    for (uint8_t bit = 0x80; bit != 0; bit >>= 1) {
+        digitalWrite(PIN_MOSI, (out & bit) ? HIGH : LOW);
+        delayMicroseconds(half_period_us);
+
+        digitalWrite(PIN_SCK, HIGH);
+        delayMicroseconds(half_period_us);
+
+        if (digitalRead(PIN_MISO)) {
+            in |= bit;
+        }
+
+        digitalWrite(PIN_SCK, LOW);
+    }
+    return in;
+}
+
+void setup() {
+    Serial.begin(SERIAL_BAUD);
+    Serial.setTimeout(50);
+
+    pinMode(PIN_CS, OUTPUT);
+    digitalWrite(PIN_CS, HIGH);
+
+    pinMode(PIN_SCK, OUTPUT);
+    digitalWrite(PIN_SCK, LOW);
+
+    pinMode(PIN_MOSI, OUTPUT);
+    digitalWrite(PIN_MOSI, LOW);
+
+    pinMode(PIN_MISO, INPUT);
+}
+
+static bool readExact(uint8_t *dest, size_t len) {
+    size_t got = 0;
+    uint32_t start = millis();
+    while (got < len) {
+        if (Serial.available()) {
+            dest[got++] = Serial.read();
+            start = millis();
+        } else if (millis() - start > 100) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void loop() {
+    if (!Serial.available()) return;
+    if (Serial.read() != SYNC_BYTE) return;
+
+    uint8_t hdr[3];
+    if (!readExact(hdr, 3)) return;
+
+    uint8_t opcode = hdr[0];
+    uint16_t length = ((uint16_t)hdr[1] << 8) | hdr[2];
+
+    if (length > BUFFER_SIZE) return;
+    if (length > 0) {
+        if (!readExact(io_buffer, length)) return;
+    }
+
+    switch (opcode) {
+        case CMD_PING: {
+            uint8_t resp[] = {SYNC_BYTE, (uint8_t)(CMD_PING | RESP_OK_FLAG), 0x00, 0x00};
+            Serial.write(resp, 4);
+            break;
+        }
+
+        case CMD_SET_CLK: {
+            uint8_t resp[] = {SYNC_BYTE, (uint8_t)(CMD_SET_CLK | RESP_OK_FLAG), 0x00, 0x00};
+            Serial.write(resp, 4);
+            break;
+        }
+
+        case CMD_CS_LOW: {
+            /* Clock 4 sync pulses while CS is HIGH before dropping CS */
+            digitalWrite(PIN_CS, HIGH);
+            for (int i = 0; i < 4; i++) {
+                digitalWrite(PIN_SCK, HIGH);
+                delayMicroseconds(5);
+                digitalWrite(PIN_SCK, LOW);
+                delayMicroseconds(5);
+            }
+
+            digitalWrite(PIN_CS, LOW);
+            delayMicroseconds(10);
+
+            uint8_t resp[] = {SYNC_BYTE, (uint8_t)(CMD_CS_LOW | RESP_OK_FLAG), 0x00, 0x00};
+            Serial.write(resp, 4);
+            break;
+        }
+
+        case CMD_CS_HIGH: {
+            delayMicroseconds(5);
+            digitalWrite(PIN_CS, HIGH);
+            delayMicroseconds(10);
+
+            uint8_t resp[] = {SYNC_BYTE, (uint8_t)(CMD_CS_HIGH | RESP_OK_FLAG), 0x00, 0x00};
+            Serial.write(resp, 4);
+            break;
+        }
+
+        case CMD_GET_STATUS: {
+            /* 
+             * CSR8645 Specification §7.3.1:
+             * CS MUST BE HIGH (DESELECTED) to read CPU Run/Stop status on MISO!
+             * MISO = 1: STOPPED, MISO = 0: RUNNING
+             */
+            digitalWrite(PIN_CS, HIGH);
+            delayMicroseconds(10);
+            uint8_t is_stopped = digitalRead(PIN_MISO) ? 1 : 0;
+
+            uint8_t resp[] = {SYNC_BYTE, (uint8_t)(CMD_GET_STATUS | RESP_OK_FLAG), 0x00, 0x01, is_stopped};
+            Serial.write(resp, 5);
+            break;
+        }
+
+        case CMD_XFER: {
+            for (uint16_t i = 0; i < length; i++) {
+                io_buffer[i] = bb_transfer(io_buffer[i]);
+            }
+
+            uint8_t resp_hdr[] = {
+                SYNC_BYTE,
+                (uint8_t)(CMD_XFER | RESP_OK_FLAG),
+                (uint8_t)(length >> 8),
+                (uint8_t)(length & 0xFF)
+            };
+            Serial.write(resp_hdr, 4);
+            Serial.write(io_buffer, length);
+            break;
+        }
+
+        default:
+            break;
+    }
+}

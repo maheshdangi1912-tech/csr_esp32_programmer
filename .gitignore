@@ -1,5 +1,17 @@
-libftdi1*
-libusb*
-lib-*
-obj-*
-csr-spi-ftdi-*
+cat << 'EOF' > .gitignore
+# Build artifacts
+obj-win32/
+lib-win32/
+*.o
+*.dll
+*.exe
+*.log
+*.psr
+
+# Editor & OS files
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+EOF
